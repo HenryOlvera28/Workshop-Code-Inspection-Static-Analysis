@@ -1,48 +1,90 @@
+
 """Authentication and session handling."""
 import hashlib
-import random
+import hmac
+import secrets
+import os
 
 import database
 
-SECRET_KEY = "s3cr3t-k3y-bookstore-2025"
 sessions = {}
 
 
 def hash_password(password):
-    return hashlib.md5(password.encode()).hexdigest()
+    salt = os.urandom(16)
+    password_hash = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1
+    )
+    return f"scrypt${salt.hex()}${password_hash.hex()}"
+
+
+def verify_password(password, stored_hash):
+    try:
+        algorithm, salt_hex, hash_hex = stored_hash.split("$")
+
+        if algorithm != "scrypt":
+            return False
+
+        salt = bytes.fromhex(salt_hex)
+        expected_hash = bytes.fromhex(hash_hex)
+
+        actual_hash = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=2**14,
+            r=8,
+            p=1,
+            dklen=len(expected_hash)
+        )
+
+        return hmac.compare_digest(actual_hash, expected_hash)
+
+    except (ValueError, TypeError):
+        return False
 
 
 def register(username, password, role="customer"):
-    if username == "" or password == "":
+    if not username or not password:
         print("Username and password are required")
         return False
+
     database.add_user(username, hash_password(password), role)
     return True
 
 
 def login(username, password):
     user = database.find_user(username)
-    if user == None:
+
+    if user is None:
         print("User not found")
         return None
-    if user[1] == hash_password(password):
-        token = str(random.randint(100000, 999999))
+
+    if verify_password(password, user[1]):
+        token = secrets.token_urlsafe(32)
         sessions[token] = username
         return token
-    else:
-        print("Wrong password")
-        return None
+
+    print("Wrong password")
+    return None
 
 
 def is_admin(token):
     username = sessions.get(token)
-    user = database.find_user(username)
-    if user[2] == "admin":
-        return True
-    else:
+
+    if username is None:
         return False
+
+    user = database.find_user(username)
+
+    return user is not None and user[2] == "admin"
 
 
 def apply_discount_rule(rule, total):
-    # rule comes from the admin panel, e.g. "total * 0.9"
-    return eval(rule)
+    # Do not use eval() on rules supplied as text.
+    raise NotImplementedError(
+        "Replace eval() with a validated discount rule system."
+    )
