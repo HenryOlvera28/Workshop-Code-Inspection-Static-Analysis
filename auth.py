@@ -7,6 +7,7 @@ import os
 
 import database
 
+SESSION_TOKEN_BYTES = 32
 sessions = {}
 
 
@@ -64,7 +65,7 @@ def login(username, password):
         return None
 
     if verify_password(password, user[1]):
-        token = secrets.token_urlsafe(32)
+        token = secrets.token_urlsafe(SESSION_TOKEN_BYTES)
         sessions[token] = username
         return token
 
