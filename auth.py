@@ -1,5 +1,8 @@
 
 """Authentication and session handling."""
+import ast
+import math
+import operator
 import hashlib
 import hmac
 import secrets
@@ -84,8 +87,67 @@ def is_admin(token):
     return user is not None and user[2] == "admin"
 
 
+
+def _evaluate_discount_node(node, total):
+    if isinstance(node, ast.Constant):
+        if type(node.value) not in (int, float):
+            raise ValueError("Invalid numeric value")
+        value = float(node.value)
+
+    elif isinstance(node, ast.Name) and node.id == "total":
+        value = total
+
+    elif isinstance(node, ast.BinOp):
+        operations = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+        }
+        operation = operations.get(type(node.op))
+
+        if operation is None:
+            raise ValueError("Unsupported operation")
+
+        left = _evaluate_discount_node(node.left, total)
+        right = _evaluate_discount_node(node.right, total)
+        value = operation(left, right)
+
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.USub):
+            value = -_evaluate_discount_node(node.operand, total)
+        elif isinstance(node.op, ast.UAdd):
+            value = _evaluate_discount_node(node.operand, total)
+        else:
+            raise ValueError("Unsupported operation")
+
+    else:
+        raise ValueError("Invalid discount expression")
+
+    if not math.isfinite(value):
+        raise ValueError("Result must be finite")
+
+    return value
+
+
 def apply_discount_rule(rule, total):
-    # Do not use eval() on rules supplied as text.
-    raise NotImplementedError(
-        "Replace eval() with a validated discount rule system."
-    )
+    if not isinstance(rule, str) or len(rule) > 200:
+        raise ValueError("Invalid discount rule")
+
+    if (
+        isinstance(total, bool)
+        or not isinstance(total, (int, float))
+        or not math.isfinite(total)
+    ):
+        raise ValueError("Invalid total")
+
+    try:
+        tree = ast.parse(rule, mode="eval")
+
+        if sum(1 for _ in ast.walk(tree)) > 50:
+            raise ValueError("Discount expression is too complex")
+
+        return _evaluate_discount_node(tree.body, float(total))
+
+    except (SyntaxError, TypeError, ZeroDivisionError, OverflowError) as exc:
+        raise ValueError("Invalid discount rule") from exc
